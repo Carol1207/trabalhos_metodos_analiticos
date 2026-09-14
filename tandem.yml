@@ -1,0 +1,23 @@
+simulation:
+  random_numbers: 100000
+  seed: 123456789
+
+external_arrivals:
+  Fila1:
+    first_arrival: 2.5
+    interval: [1.0, 5.0]
+
+queues:
+  Fila1:
+    servers: 2
+    capacity: 3
+    service_interval: [4.0, 5.0]
+  Fila2:
+    servers: 1
+    capacity: 5
+    service_interval: [1.0, 3.0]
+
+network:
+  - source: Fila1
+    target: Fila2
+    probability: 1.0
