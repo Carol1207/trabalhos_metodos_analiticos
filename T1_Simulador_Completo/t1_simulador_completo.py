@@ -168,10 +168,14 @@ def main() -> None:
     parser.add_argument("config", nargs="?", default="t1_modelo.yml")
     args = parser.parse_args()
     
-    with Path(args.config).open(encoding="utf-8") as f:
+    config_path = Path(args.config)
+    if not config_path.exists():
+        script_dir_path = Path(__file__).resolve().parent / args.config
+        if script_dir_path.exists():
+            config_path = script_dir_path
+            
+    with config_path.open(encoding="utf-8") as f:
         yaml_content = f.read()
-        
-    # Remove a tag customizada "!PARAMETERS" que quebra o interpretador pyyaml padrão
     clean_yaml = re.sub(r'^!PARAMETERS\s*\n', '', yaml_content, flags=re.MULTILINE)
     config = yaml.safe_load(clean_yaml)
     
