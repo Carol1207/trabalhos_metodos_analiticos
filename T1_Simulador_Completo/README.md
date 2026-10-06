@@ -112,13 +112,3 @@ estado (número de clientes na fila) e o número de clientes perdidos. No fim,
 mostra o tempo global da simulação. No início há uma linha por execução com a
 semente, os aleatórios usados, o tempo global e as perdas. Com várias sementes,
 as tabelas mostram a média das execuções.
-
-## Arquivos
-
-| Arquivo | Conteúdo |
-|---|---|
-| `t1_simulador_completo.py` | simulador genérico de redes de filas |
-| `t1_modelo.yml` | rede do enunciado |
-| `RESULTADOS.md` | resultados da simulação de `t1_modelo.yml` |
-| `fila_simples.py` | versão anterior: uma fila, com os parâmetros no código |
-| `fila_multiplas.py`, `tandem.yml` | versão anterior: filas em tandem, com YAML em formato próprio (`python3 fila_multiplas.py tandem.yml`) |
