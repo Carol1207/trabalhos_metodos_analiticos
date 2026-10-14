@@ -1,0 +1,40 @@
+!PARAMETERS
+arrivals: 
+   N1_Triagem: 2.0
+
+queues: 
+   N1_Triagem: 
+      servers: 1
+      capacity: 8
+      minArrival: 2.0
+      maxArrival: 4.0
+      minService: 1.0
+      maxService: 2.5
+   N2_Tecnico: 
+      servers: 2
+      capacity: 8
+      minService: 4.0
+      maxService: 7.0
+   N3_Engenharia: 
+      servers: 1
+      capacity: 6
+      minService: 6.0
+      maxService: 12.0
+
+network: 
+-  source: N1_Triagem
+   target: N2_Tecnico
+   probability: 0.4
+-  source: N2_Tecnico
+   target: N1_Triagem
+   probability: 0.3
+-  source: N2_Tecnico
+   target: N3_Engenharia
+   probability: 0.25
+-  source: N3_Engenharia
+   target: N2_Tecnico
+   probability: 0.8
+
+rndnumbersPerSeed: 100000
+seeds: 
+- 123456789
