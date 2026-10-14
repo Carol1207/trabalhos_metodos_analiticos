@@ -1,0 +1,44 @@
+!PARAMETERS
+rndnumbersPerSeed: 100000
+seeds: 
+- 1
+
+arrivals: 
+   TRIAGEM: 5.0
+
+queues: 
+   TRIAGEM: 
+      servers: 3
+      capacity: 10
+      minArrival: 5.0
+      maxArrival: 10.0
+      minService: 5.0
+      maxService: 15.0
+   CONSULTORIOS: 
+      servers: 4
+      capacity: 15
+      minService: 10.0
+      maxService: 30.0
+   LABORATORIO: 
+      servers: 2
+      capacity: 20
+      minService: 8.0
+      maxService: 15.0
+
+network: 
+-  source: TRIAGEM
+   target: CONSULTORIOS
+   probability: 0.7
+-  source: TRIAGEM
+   target: LABORATORIO
+   probability: 0.2
+-  source: CONSULTORIOS
+   target: TRIAGEM
+   probability: 0.5
+-  source: CONSULTORIOS
+   target: LABORATORIO
+   probability: 0.3
+-  source: LABORATORIO
+   target: TRIAGEM
+   probability: 0.2
+
