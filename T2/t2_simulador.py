@@ -438,7 +438,7 @@ def report(result: ReplicationResult) -> str:
         "",
     ])
 
-    # Detalhamento estado por estado (formato identico ao do professor)
+    # Detalhamento estado por estado
     for q_name, m in metrics.items():
         q = result.queue_configs[q_name]
         lines.extend([
