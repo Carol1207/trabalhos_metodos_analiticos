@@ -37,4 +37,8 @@ network:
 
 rndnumbersPerSeed: 100000
 seeds: 
-- 123456789
+- 1
+- 2
+- 3
+- 4
+- 5

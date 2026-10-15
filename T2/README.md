@@ -11,10 +11,14 @@ Este diretório contém a implementação completa, modelos de configuração e 
   - Utilização dos servidores ($U$)
   - Vazão média ($X$)
   - Tempo de resposta no sistema ($W$) e espera na fila ($W_q$)
+  - Índices da rede completa (população, vazão de saída, tempo de permanência e % de clientes perdidos)
+  - Média dos resultados sobre todas as sementes listadas em `seeds` no YAML
   - Modo `--compare` para gerar tabela comparativa automática entre modelos
 - **[t2_modelo.yml](t2_modelo.yml):** Arquivo de configuração YAML do **Modelo Base (Situação Atual)** com 3 filas e duplo retorno (feedback).
 - **[t2_modelo_melhorado.yml](t2_modelo_melhorado.yml):** Arquivo de configuração YAML do **Modelo Otimizado (Situação Futura)** com remanejamento de servidores e balanceamento de carga.
-- **[RELATORIO_T2.md](RELATORIO_T2.md):** Relatório técnico completo pronto para entrega, contendo a problemática de Suporte de TI, desenhos da rede (Mermaid e ASCII), notação de Kendall, fórmulas de Little e Análise Operacional, identificação do gargalo e tabela comparativa antes x depois.
+- **[RELATORIO_T2.md](RELATORIO_T2.md):** Relatório técnico completo pronto para entrega, contendo a problemática de Suporte de TI, desenhos da rede (Mermaid e ASCII), notação de Kendall, fórmulas de Little e Análise Operacional, identificação do gargalo, tabela comparativa antes x depois e validação do simulador contra o `simulator.jar`.
+- **[apresentacao_T2.pptx](apresentacao_T2.pptx):** Apresentação de 12 slides (capa, realidade simulada, modelo, resultados, gargalo, proposta de melhoria, comparação, validação e conclusões), com notas do apresentador.
+- **[ROTEIRO_VIDEO.md](ROTEIRO_VIDEO.md):** Roteiro do vídeo, com a fala e o tempo de cada slide.
 
 ---
 

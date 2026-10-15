@@ -118,6 +118,19 @@ class QueueMetrics:
     probabilities: list[tuple[int, float, float]]  # (state, time, pct)
 
 
+@dataclass
+class NetworkMetrics:
+    external_arrivals: float  # clientes que chegaram do exterior
+    external_losses: float  # bloqueados ja na entrada da rede
+    internal_losses: float  # bloqueados ao serem roteados entre filas
+    departures: float  # sairam da rede apos atendimento
+    arrival_rate: float  # lambda de clientes aceitos na rede
+    throughput: float  # X da rede (saidas apos atendimento / tempo)
+    population: float  # N da rede (soma das filas)
+    response_time: float  # W da rede = N / lambda aceito (Little)
+    loss_probability: float  # % dos clientes externos que foram perdidos
+
+
 class QueueNetworkSimulator:
     def __init__(self, config: dict, seed: int | None = None) -> None:
         self.config = config
@@ -132,6 +145,9 @@ class QueueNetworkSimulator:
 
         self.now = 0.0
         self.sequence = 0
+        self.external_arrivals = 0
+        self.external_losses = 0
+        self.departures = 0
         self.events: list[tuple[float, int, EventType, str]] = []
 
         self.queues: dict[str, Queue] = {}
@@ -177,6 +193,7 @@ class QueueNetworkSimulator:
     def route_customer(self, source: str) -> None:
         routes = self.routes.get(source, [])
         if not routes:
+            self.departures += 1
             return
 
         # Rota deterministica unica de 100% nao consome numero aleatorio
@@ -192,10 +209,14 @@ class QueueNetworkSimulator:
                 self.receive_customer(target)
                 return
         # Se choice >= cumulative total, o cliente sai da rede
+        self.departures += 1
 
     def handle_external_arrival(self, queue_name: str) -> None:
-        self.receive_customer(queue_name)
         queue = self.queues[queue_name]
+        losses_before = queue.losses
+        self.receive_customer(queue_name)
+        self.external_arrivals += 1
+        self.external_losses += queue.losses - losses_before
         if queue.arrival_min is not None and queue.arrival_max is not None:
             interval = self.random.uniform(queue.arrival_min, queue.arrival_max)
             self.schedule(self.now + interval, "external_arrival", queue_name)
@@ -295,53 +316,149 @@ class QueueNetworkSimulator:
 
         return results
 
-    def report(self) -> str:
-        metrics = self.compute_metrics()
-        lines: list[str] = [
-            "=" * 70,
-            "         RELATORIO COMPLETO DE SIMULACAO DA REDE DE FILAS",
-            "=" * 70,
-            f"Tempo global da simulacao: {self.now:.4f}",
-            f"Numeros aleatorios utilizados: {self.random.used}",
-            "",
-        ]
+    def compute_network_metrics(self) -> NetworkMetrics:
+        total_time = self.now if self.now > 0 else 1.0
+        total_losses = sum(q.losses for q in self.queues.values())
+        internal_losses = total_losses - self.external_losses
+        accepted = self.external_arrivals - self.external_losses
+        arrival_rate = accepted / total_time
+        population = sum(m.population_total for m in self.compute_metrics().values())
+        return NetworkMetrics(
+            external_arrivals=self.external_arrivals,
+            external_losses=self.external_losses,
+            internal_losses=internal_losses,
+            departures=self.departures,
+            arrival_rate=arrival_rate,
+            throughput=self.departures / total_time,
+            population=population,
+            response_time=population / arrival_rate if arrival_rate > 0 else 0.0,
+            loss_probability=(total_losses / self.external_arrivals * 100.0) if self.external_arrivals > 0 else 0.0,
+        )
 
-        # Tabela resumo de Indices de Desempenho
+
+def _average(values: list) -> float:
+    return sum(values) / len(values)
+
+
+def _average_dataclass(items: list, cls):
+    """Media campo a campo de dataclasses com campos numericos."""
+    first = items[0]
+    averaged = {}
+    for name in first.__dataclass_fields__:
+        value = getattr(first, name)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and name not in ("servers", "capacity"):
+            averaged[name] = _average([getattr(item, name) for item in items])
+        else:
+            averaged[name] = value
+    return cls(**averaged)
+
+
+@dataclass
+class ReplicationResult:
+    seeds: list[int]
+    simulation_time: float
+    random_used: float
+    queues: dict[str, QueueMetrics]
+    network: NetworkMetrics
+    queue_configs: dict[str, Queue]
+
+
+def run_replications(config: dict) -> ReplicationResult:
+    """Executa uma simulacao por semente do YAML e retorna a media dos indices."""
+    if config.get("rndnumbers"):
+        seeds: list[int] = [0]  # semente ignorada: usa a lista fixa
+    else:
+        seeds = [int(s) for s in config.get("seeds", [123456789])]
+
+    sims = []
+    for seed in seeds:
+        sim = QueueNetworkSimulator(config, seed=seed)
+        sim.run()
+        sims.append(sim)
+
+    per_seed = [sim.compute_metrics() for sim in sims]
+    queues: dict[str, QueueMetrics] = {}
+    for name in per_seed[0]:
+        items = [m[name] for m in per_seed]
+        averaged = _average_dataclass(items, QueueMetrics)
+        n_states = max(len(m.probabilities) for m in items)
+        probabilities = []
+        for state in range(n_states):
+            times = [m.probabilities[state][1] if state < len(m.probabilities) else 0.0 for m in items]
+            pcts = [m.probabilities[state][2] if state < len(m.probabilities) else 0.0 for m in items]
+            probabilities.append((state, _average(times), _average(pcts)))
+        averaged.probabilities = probabilities
+        queues[name] = averaged
+
+    return ReplicationResult(
+        seeds=seeds,
+        simulation_time=_average([sim.now for sim in sims]),
+        random_used=_average([sim.random.used for sim in sims]),
+        queues=queues,
+        network=_average_dataclass([sim.compute_network_metrics() for sim in sims], NetworkMetrics),
+        queue_configs=sims[0].queues,
+    )
+
+
+def report(result: ReplicationResult) -> str:
+    metrics = result.queues
+    net = result.network
+    seeds_str = ", ".join(str(s) for s in result.seeds)
+    lines: list[str] = [
+        "=" * 70,
+        "         RELATORIO COMPLETO DE SIMULACAO DA REDE DE FILAS",
+        "=" * 70,
+        f"Sementes ({len(result.seeds)}): {seeds_str}" if result.seeds != [0] else "Aleatorios: lista fixa (rndnumbers)",
+        f"Tempo global da simulacao (media): {result.simulation_time:.4f}",
+        f"Numeros aleatorios utilizados (por semente): {result.random_used:.0f}",
+        "",
+    ]
+
+    # Tabela resumo de Indices de Desempenho
+    lines.extend([
+        "-" * 70,
+        "               INDICES DE DESEMPENHO POR FILA",
+        "-" * 70,
+        f"{'Fila':<14} | {'Kendall':<10} | {'Utilizacao':<10} | {'Vazao (X)':<10} | {'N (Pop)':<8} | {'Nq (Fila)':<9} | {'W (Resp)':<8} | {'Perdas':<8}",
+        "-" * 70,
+    ])
+    for q_name, m in metrics.items():
+        lines.append(
+            f"{q_name:<14} | {m.kendall:<10} | {m.utilization * 100:>9.2f}% | {m.throughput:>10.4f} | {m.population_total:>8.3f} | {m.population_queue:>9.3f} | {m.response_time:>8.3f} | {m.losses:>8.1f}"
+        )
+    lines.append("-" * 70)
+    lines.extend([
+        "Rede completa:",
+        f"  Chegadas externas: {net.external_arrivals:.1f} | Perdas na entrada: {net.external_losses:.1f} | Perdas internas: {net.internal_losses:.1f}",
+        f"  Taxa de chegada aceita (lambda): {net.arrival_rate:.4f} | Vazao de saida (X): {net.throughput:.4f}",
+        f"  Populacao media na rede (N): {net.population:.3f}",
+        f"  Tempo medio de permanencia na rede (W = N / lambda): {net.response_time:.3f}",
+        f"  Clientes perdidos: {net.loss_probability:.2f}% das chegadas externas",
+        "-" * 70,
+        "",
+    ])
+
+    # Detalhamento estado por estado (formato identico ao do professor)
+    for q_name, m in metrics.items():
+        q = result.queue_configs[q_name]
         lines.extend([
-            "-" * 70,
-            "               INDICES DE DESEMPENHO POR FILA",
-            "-" * 70,
-            f"{'Fila':<12} | {'Kendall':<12} | {'Utilizacao':<10} | {'Vazao (X)':<10} | {'N (Pop)':<8} | {'Nq (Fila)':<8} | {'W (Resp)':<8} | {'Perdas':<7}",
-            "-" * 70,
+            "*" * 60,
+            f"Fila: {q_name} ({m.kendall})",
         ])
-        for q_name, m in metrics.items():
-            lines.append(
-                f"{q_name:<12} | {m.kendall:<12} | {m.utilization * 100:>9.2f}% | {m.throughput:>10.4f} | {m.population_total:>8.3f} | {m.population_queue:>8.3f} | {m.response_time:>8.3f} | {m.losses:>7d}"
-            )
-        lines.append("-" * 70)
+        if q.arrival_min is not None and q.arrival_max is not None:
+            lines.append(f"Chegadas externas: {q.arrival_min:.1f} ... {q.arrival_max:.1f}")
+        lines.append(f"Tempo de atendimento: {q.service_min:.1f} ... {q.service_max:.1f}")
+        lines.append("*" * 60)
+        lines.append(f"{'Estado':>8} | {'Tempo Acumulado':>18} | {'Probabilidade':>14}")
+        lines.append("-" * 46)
+        for state, acc_time, prob_pct in m.probabilities:
+            lines.append(f"{state:8d} | {acc_time:18.4f} | {prob_pct:13.2f}%")
+        lines.append(f"Perdas de clientes: {m.losses:.1f} ({m.loss_probability:.2f}% dos clientes)")
+        lines.append(f"Tempo medio de espera na fila (Wq): {m.queue_wait_time:.4f}")
+        lines.append(f"Tempo medio de resposta total (W):  {m.response_time:.4f}")
         lines.append("")
 
-        # Detalhamento estado por estado (formato identico ao do professor)
-        for q_name, m in metrics.items():
-            q = self.queues[q_name]
-            lines.extend([
-                "*" * 60,
-                f"Fila: {q_name} ({m.kendall})",
-            ])
-            if q.arrival_min is not None and q.arrival_max is not None:
-                lines.append(f"Chegadas externas: {q.arrival_min:.1f} ... {q.arrival_max:.1f}")
-            lines.append(f"Tempo de atendimento: {q.service_min:.1f} ... {q.service_max:.1f}")
-            lines.append("*" * 60)
-            lines.append(f"{'Estado':>8} | {'Tempo Acumulado':>18} | {'Probabilidade':>14}")
-            lines.append("-" * 46)
-            for state, acc_time, prob_pct in m.probabilities:
-                lines.append(f"{state:8d} | {acc_time:18.4f} | {prob_pct:13.2f}%")
-            lines.append(f"Perdas de clientes: {m.losses} ({m.loss_probability:.2f}% dos clientes)")
-            lines.append(f"Tempo medio de espera na fila (Wq): {m.queue_wait_time:.4f}")
-            lines.append(f"Tempo medio de resposta total (W):  {m.response_time:.4f}")
-            lines.append("")
-
-        return "\n".join(lines)
+    return "\n".join(lines)
 
 
 def load_yaml_config(path: str | Path) -> dict:
@@ -355,21 +472,17 @@ def load_yaml_config(path: str | Path) -> dict:
 
 
 def compare_models(path_base: str, path_improved: str) -> str:
-    cfg1 = load_yaml_config(path_base)
-    sim1 = QueueNetworkSimulator(cfg1)
-    sim1.run()
-    m1 = sim1.compute_metrics()
+    r1 = run_replications(load_yaml_config(path_base))
+    m1 = r1.queues
 
-    cfg2 = load_yaml_config(path_improved)
-    sim2 = QueueNetworkSimulator(cfg2)
-    sim2.run()
-    m2 = sim2.compute_metrics()
+    r2 = run_replications(load_yaml_config(path_improved))
+    m2 = r2.queues
 
     lines = [
         "=" * 85,
         "         COMPARATIVO: MODELO BASE (ATUAL) vs MODELO MELHORADO (FUTURO)",
         "=" * 85,
-        f"Tempo Simulacao Base: {sim1.now:.2f} | Tempo Simulacao Melhorado: {sim2.now:.2f}",
+        f"Tempo Simulacao Base: {r1.simulation_time:.2f} | Tempo Simulacao Melhorado: {r2.simulation_time:.2f}",
         "-" * 85,
         f"{'Metrica / Fila':<24} | {'Modelo Base (Atual)':<26} | {'Modelo Melhorado':<26}",
         "-" * 85,
@@ -389,8 +502,16 @@ def compare_models(path_base: str, path_improved: str) -> str:
             lines.append(f"   Fila de espera (Nq):    | {b.population_queue:>25.3f} | {imp.population_queue:>25.3f}")
             lines.append(f"   Tempo de Resposta (W):  | {b.response_time:>25.3f} | {imp.response_time:>25.3f}")
             lines.append(f"   Espera na fila (Wq):    | {b.queue_wait_time:>25.3f} | {imp.queue_wait_time:>25.3f}")
-            lines.append(f"   Perdas de clientes:     | {b.losses:>25d} | {imp.losses:>25d}")
+            lines.append(f"   Perdas de clientes:     | {b.losses:>25.1f} | {imp.losses:>25.1f}")
         lines.append("-" * 85)
+
+    n1, n2 = r1.network, r2.network
+    lines.append(">> Rede completa")
+    lines.append(f"   Populacao na rede (N):  | {n1.population:>25.3f} | {n2.population:>25.3f}")
+    lines.append(f"   Vazao de saida (X):     | {n1.throughput:>25.4f} | {n2.throughput:>25.4f}")
+    lines.append(f"   Permanencia (W):        | {n1.response_time:>25.3f} | {n2.response_time:>25.3f}")
+    lines.append(f"   Clientes perdidos (%):  | {n1.loss_probability:>24.2f}% | {n2.loss_probability:>24.2f}%")
+    lines.append("-" * 85)
 
     return "\n".join(lines)
 
@@ -412,9 +533,7 @@ def main() -> None:
             config_path = local_path
 
     config = load_yaml_config(config_path)
-    sim = QueueNetworkSimulator(config)
-    sim.run()
-    print(sim.report())
+    print(report(run_replications(config)))
 
 
 if __name__ == "__main__":
